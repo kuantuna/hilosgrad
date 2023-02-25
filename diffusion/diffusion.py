@@ -1,53 +1,57 @@
-import matplotlib.pyplot as plt
+import math
 import numpy as np
 
-from matplotlib import image
-from schedulers import linear_scheduler
 
-img = image.imread('cat.jpg')
+class Diffusion:
+    def __init__(self, num_steps=1000, noise_scheduler='linear') -> None:
+        self.num_steps = num_steps
+        self.noise_scheduler = noise_scheduler
+        self.betas = None
+        self.alphas = None
+        self.alphas_hat = None
+        self.set_scheduler = None
+        self._prepare_noise_scheduler()
 
+    def _prepare_noise_scheduler(self):
+        valid_noise_schedulers = ['linear', 'cosine']
+        if self.noise_scheduler not in valid_noise_schedulers:
+            raise ValueError(
+                f'{self.noise_scheduler} is not a valid scheduler.')
+        if self.noise_scheduler == 'linear':
+            def set_scheduler(beta_start: float = 0.0001, beta_stop: float = 0.02) -> None:
+                self.betas = np.linspace(beta_start, beta_stop, self.num_steps)
+                self.alphas = 1 - self.betas
+                self.alphas_hat = np.cumprod(self.alphas)
 
-# helper functions
-def normalize(img):
-    return img / 255 * 2 - 1
+        elif self.noise_scheduler == 'cosine':
+            def alpha_bar(t):
+                return math.cos((t + 0.008) / 1.008 * math.pi / 2) ** 2
 
+            def set_scheduler(max_beta: float = 0.999) -> None:
+                betas = []
+                for i in range(self.num_steps):
+                    t1 = i / self.num_steps
+                    t2 = (i + 1) / self.num_steps
+                    betas.append(
+                        min(1 - alpha_bar(t2) / alpha_bar(t1), max_beta))
+                self.betas = np.array(betas)
+                self.alphas = 1 - self.betas
+                self.alphas_hat = np.cumprod(self.alphas)
+        self.set_scheduler = set_scheduler
 
-# def denormalize(img, data_type):
-#     img = np.clip(img, -1.0, 1.0)
-#     img = (img + 1) / 2 * 255
-#     return np.rint(img).astype(data_type)
+    def forward_process(self, image, t):
+        H, W, C = image.shape
+        alpha_hat = self.alphas_hat[t-1]
+        squared_alpha_hat = alpha_hat**0.5
+        one_minus_squared_alpha_hat = (1-alpha_hat)**0.5
+        n_dist = np.random.randn(H, W, C)
+        return squared_alpha_hat*image + one_minus_squared_alpha_hat*n_dist
 
-def denormalize(img):
-    return (img + 1) / 2
-
-
-# initialization
-T = 1000
-beta_start = 0.0001
-beta_stop = 0.02
-betas, alphas = linear_scheduler(beta_start, beta_stop, T)
-print(f"{betas.shape=}")
-print(f"{alphas.shape=}")
-
-
-# forward diffusion process (step-by-step)
-imgs = [normalize(img)]
-for t in range(T):
-    beta = betas[0]
-    alpha = alphas[0]
-    std = beta**0.5
-    mean = alpha*imgs[t]
-    normal_dist = np.random.randn(img.shape[0], img.shape[1], img.shape[2])
-    noised_img = std*normal_dist + mean  # thanks to reparametrization trick
-    imgs.append(noised_img)
-
-
-# visualization
-fig = plt.figure(figsize=(24, 24))
-for idx, im in enumerate(imgs):
-    if idx % 200 == 0:
-        ax = fig.add_subplot(2, 3, int(idx/200)+1)
-        ax.set_title(f"{idx}. iter")
-        dim = denormalize(im)
-        plt.imshow(dim)
-plt.show()
+    def forward_process_step(self, image, T):
+        H, W, C = image.shape
+        for t in range(T):
+            squared_alpha = self.alphas[t]**0.5
+            squared_beta = self.betas[t]**0.5
+            n_dist = np.random.randn(H, W, C)
+            image = squared_alpha*image + squared_beta*n_dist
+        return image
