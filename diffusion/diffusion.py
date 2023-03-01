@@ -1,5 +1,5 @@
 import math
-import numpy as np
+import torch
 
 
 class Diffusion:
@@ -19,9 +19,10 @@ class Diffusion:
                 f'{self.noise_scheduler} is not a valid scheduler.')
         if self.noise_scheduler == 'linear':
             def set_scheduler(beta_start: float = 0.0001, beta_stop: float = 0.02) -> None:
-                self.betas = np.linspace(beta_start, beta_stop, self.num_steps)
+                self.betas = torch.linspace(
+                    beta_start, beta_stop, self.num_steps)
                 self.alphas = 1 - self.betas
-                self.alphas_hat = np.cumprod(self.alphas)
+                self.alphas_hat = torch.cumprod(self.alphas, dim=0)
 
         elif self.noise_scheduler == 'cosine':
             def alpha_bar(t):
@@ -34,24 +35,22 @@ class Diffusion:
                     t2 = (i + 1) / self.num_steps
                     betas.append(
                         min(1 - alpha_bar(t2) / alpha_bar(t1), max_beta))
-                self.betas = np.array(betas)
+                self.betas = torch.tensor(betas)
                 self.alphas = 1 - self.betas
-                self.alphas_hat = np.cumprod(self.alphas)
+                self.alphas_hat = torch.cumprod(self.alphas, dim=0)
         self.set_scheduler = set_scheduler
 
     def forward_process(self, image, t):
-        H, W, C = image.shape
         alpha_hat = self.alphas_hat[t-1]
-        squared_alpha_hat = alpha_hat**0.5
-        one_minus_squared_alpha_hat = (1-alpha_hat)**0.5
-        n_dist = np.random.randn(H, W, C)
+        squared_alpha_hat = torch.sqrt(alpha_hat)
+        one_minus_squared_alpha_hat = torch.sqrt(1-alpha_hat)
+        n_dist = torch.randn_like(image)
         return squared_alpha_hat*image + one_minus_squared_alpha_hat*n_dist
 
     def forward_process_step(self, image, T):
-        H, W, C = image.shape
         for t in range(T):
-            squared_alpha = self.alphas[t]**0.5
-            squared_beta = self.betas[t]**0.5
-            n_dist = np.random.randn(H, W, C)
+            squared_alpha = torch.sqrt(self.alphas[t])
+            squared_beta = torch.sqrt(self.betas[t])
+            n_dist = torch.randn_like(image)
             image = squared_alpha*image + squared_beta*n_dist
         return image
